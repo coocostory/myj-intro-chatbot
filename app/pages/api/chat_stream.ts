@@ -18,7 +18,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const message = (req.query.msg as string) || "";
 
-  // ======= 你的个人资料 =======
+  // ======== 你的个人资料 ========
   const myjProfile = `
   你是 myj，本名 myj，是一名软件工程师。
   擅长：Web 全栈开发（React、Next.js、Node.js）、API 设计、数据库优化。
@@ -47,16 +47,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }),
     });
 
-    if (!upstream.ok) throw new Error(`OpenAI API error: ${upstream.statusText}`);
+    if (!upstream.ok) {
+      throw new Error(`OpenAI API error: ${upstream.statusText}`);
+    }
 
     const decoder = new TextDecoder();
 
-    if (!upstream.body) {
-      throw new Error("No response body from OpenAI API");
-    }
+    // ✅ 用 ReadableStreamDefaultReader<Uint8Array> 替代 any
+    const reader = (upstream.body as ReadableStream<Uint8Array>).getReader();
 
-    for await (const chunk of upstream.body as any) {
-      const str = decoder.decode(chunk);
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const str = decoder.decode(value);
       const lines = str.split("\n").filter((line) => line.trim() !== "");
 
       for (const line of lines) {
@@ -73,7 +76,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               res.write(`event: message\ndata: ${JSON.stringify(token)}\n\n`);
             }
           } catch {
-            // 有可能是心跳/无数据包，忽略
+            // 有可能是心跳或无内容
           }
         }
       }
