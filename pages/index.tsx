@@ -1,4 +1,3 @@
-"use client";
 import { useState } from "react";
 
 interface ChatMessage {
@@ -7,114 +6,113 @@ interface ChatMessage {
 }
 
 export default function Home() {
-  const [message, setMessage] = useState<string>("");
+  const [message, setMessage] = useState("");
   const [chatLog, setChatLog] = useState<ChatMessage[]>([]);
-  const [currentReply, setCurrentReply] = useState<string>("");
+  const [currentReply, setCurrentReply] = useState("");
 
   const quickReplies = [
     "你是谁？",
     "你会哪些技能？",
     "介绍一下你的工作经历",
     "你最近在做什么项目？",
-    "你的兴趣爱好是什么？",
+    "你的兴趣爱好是什么？"
   ];
 
-  const sendMessage = (content?: string) => {
-    const userMessage = content || message;
+  const sendMessage = async (preset?: string) => {
+    const userMessage = preset || message;
     if (!userMessage.trim()) return;
 
     setChatLog((prev) => [...prev, { role: "user", content: userMessage }]);
     setMessage("");
     setCurrentReply("");
 
-    // 直接调用 OpenAI API (流式)
-    const es = new EventSource(`${process.env.NEXT_PUBLIC_BASE_URL}/v1/chat/completions?stream=true`, {
-      withCredentials: false // 无需cookie
-    } as EventSourceInit);
-
-    es.onmessage = (e) => {
-      if (e.data === "[DONE]") {
-        setChatLog((prev) => [...prev, { role: "assistant", content: currentReply }]);
-        setCurrentReply("");
-        es.close();
-        return;
-      }
-      try {
-        const json = JSON.parse(e.data);
-        const token = json.choices?.[0]?.delta?.content || "";
-        if (token) {
-          setCurrentReply((prev) => prev + token);
-        }
-      } catch {}
-    };
-
-    es.onerror = (err) => {
-      console.error("SSE error", err);
-      es.close();
-    };
-
-    // 💡 这里使用 fetch 先发送一次创建会话
-    fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/v1/chat/completions`, {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
+        "Authorization": `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`, // 暴露给前端用
       },
       body: JSON.stringify({
-        model: "gpt-5-nano", // ✅ 直接换成 gpt-5-nano
+        model: "gpt-5-nano",
         messages: [
           {
             role: "system",
-            content: `
-              你是 myj，本名 myj，是一名软件工程师。
-              擅长：Web 全栈开发（React、Next.js、Node.js）、API 设计、数据库优化。
-              工作经历：曾在 ABC 科技公司担任前端开发三年，目前在 XYZ 公司做全栈工程师。
-              兴趣爱好：喜欢研究新技术、开源贡献、旅行与摄影。
-              你的任务是用自然语言向别人介绍自己，回答任何关于你的问题。
-              如果问题超出你的信息范围，请礼貌说明，并引导他们了解你相关的能力或背景。
-            `,
+            content: `你是 myj，本名 myj，是一名软件工程师。
+                      擅长：Web 全栈开发（React、Next.js、Node.js）、API 设计、数据库优化。
+                      工作经历：曾在 ABC 科技公司担任前端开发三年，目前在 XYZ 公司做全栈工程师。
+                      兴趣爱好：喜欢研究新技术、开源贡献、旅行与摄影。
+                      你的任务是用自然语言向别人介绍自己，回答任何关于你的问题。
+                      如果问题超出你的信息范围，请礼貌说明，并引导他们了解你相关的能力或背景。`
           },
-          { role: "user", content: userMessage },
+          {
+            role: "user",
+            content: userMessage
+          }
         ],
         max_tokens: 600,
-        temperature: 0.8,
-        stream: true,
-      }),
-    }).catch((err) => console.error(err));
+        stream: true
+      })
+    });
+
+    if (!response.body) return;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+
+    let fullText = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value);
+      const lines = chunk.split("\n").filter(line => line.trim() !== "");
+
+      for (const line of lines) {
+        if (line === "data: [DONE]") {
+          setChatLog((prev) => [...prev, { role: "assistant", content: fullText }]);
+          return;
+        }
+        if (line.startsWith("data: ")) {
+          try {
+            const json = JSON.parse(line.replace("data: ", ""));
+            const token = json.choices?.[0]?.delta?.content || "";
+            if (token) {
+              fullText += token;
+              setCurrentReply(fullText);
+            }
+          } catch (e) {
+            console.error("解析SSE出错", e);
+          }
+        }
+      }
+    }
   };
 
   return (
-    <div style={{ padding: 20, fontFamily: "sans-serif", maxWidth: 700, margin: "auto" }}>
-      <h1>💬 了解 myj（gpt-5-nano 流式直连版）</h1>
+    <div style={{ padding: 20, maxWidth: 700, margin: "0 auto", fontFamily: "sans-serif" }}>
+      <h1>💬 了解 myj（gpt-5-nano - 浏览器直连版）</h1>
 
-      {/* 聊天记录 */}
-      <div style={{ border: "1px solid #ccc", padding: 10, height: 400, overflowY: "auto", borderRadius: 6, marginBottom: 10 }}>
+      {/* 聊天记录显示 */}
+      <div style={{ border: "1px solid #ccc", borderRadius: 6, padding: 10, height: 400, overflowY: "auto", marginBottom: 10 }}>
         {chatLog.map((msg, idx) => (
-          <div key={idx} style={{ margin: "8px 0", textAlign: msg.role === "user" ? "right" : "left" }}>
+          <div key={idx} style={{ textAlign: msg.role === "user" ? "right" : "left", marginBottom: 8 }}>
             <b>{msg.role === "user" ? "🧑 你" : "🤖 myj"}：</b> {msg.content}
           </div>
         ))}
         {currentReply && (
-          <div style={{ textAlign: "left", color: "#333" }}>
+          <div style={{ textAlign: "left" }}>
             <b>🤖 myj：</b> {currentReply}
-            <span style={{ background: "#ccc" }}>▋</span>
+            <span className="cursor">▋</span>
           </div>
         )}
       </div>
 
       {/* 快捷按钮 */}
       <div style={{ marginBottom: 10 }}>
-        {quickReplies.map((q, idx) => (
+        {quickReplies.map((q, i) => (
           <button
-            key={idx}
-            style={{
-              padding: "6px 12px",
-              margin: "0 5px 5px 0",
-              background: "#f0f0f0",
-              border: "1px solid #ccc",
-              borderRadius: 4,
-              cursor: "pointer",
-            }}
+            key={i}
+            style={{ padding: "6px 12px", marginRight: 6, marginBottom: 6 }}
             onClick={() => sendMessage(q)}
           >
             {q}
@@ -126,19 +124,18 @@ export default function Home() {
       <div style={{ display: "flex" }}>
         <input
           style={{ flex: 1, padding: 8, border: "1px solid #ccc", borderRadius: 4 }}
-          type="text"
-          placeholder="输入你的问题..."
           value={message}
           onChange={(e) => setMessage(e.target.value)}
+          placeholder="输入你的问题..."
         />
         <button
           style={{
             padding: "8px 16px",
-            marginLeft: 5,
             background: "#4cafef",
-            color: "#fff",
             border: "none",
+            color: "#fff",
             borderRadius: 4,
+            marginLeft: 5
           }}
           onClick={() => sendMessage()}
         >
