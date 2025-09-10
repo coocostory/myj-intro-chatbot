@@ -30,7 +30,7 @@ export default function Home() {
     // 直接调用 OpenAI API (流式)
     const es = new EventSource(`${process.env.NEXT_PUBLIC_BASE_URL}/v1/chat/completions?stream=true`, {
       withCredentials: false // 无需cookie
-    } as any);
+    } as EventSourceInit);
 
     es.onmessage = (e) => {
       if (e.data === "[DONE]") {
